@@ -89,3 +89,13 @@ With this setup:
 - Each service logs transaction details locally.
 - Traefik access logging is enabled in JSON format with request/response metadata fields and headers.
 - No database is used.
+
+For traefik - https://github.com/traefik/traefik/releases/tag/v3.6.13 
+
+(https://github.com/traefik/traefik/releases/download/v3.6.13/traefik_v3.6.13_linux_amd64.tar.gz)
+
+```bash
+nohup ./traefik --configFile=traefik.toml > nohup.out 2>&1 &
+```
+
+
