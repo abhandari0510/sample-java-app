@@ -1,0 +1,9 @@
+server:
+  port: 8081
+app:
+  policy-generator-generate-url: ${POLICY_GENERATOR_GENERATE_URL:http://localhost:8088/policy/api/policy/generate}
+logging:
+  file:
+    path: logs
+  level:
+    root: INFO

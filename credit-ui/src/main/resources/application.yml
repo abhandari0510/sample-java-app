@@ -1,0 +1,12 @@
+server:
+  port: 8080
+app:
+  credit-input-apply-url: ${CREDIT_INPUT_APPLY_URL:http://localhost:8088/api/credit/apply}
+spring:
+  mvc:
+    static-path-pattern: "/**"
+logging:
+  file:
+    path: logs
+  level:
+    root: INFO

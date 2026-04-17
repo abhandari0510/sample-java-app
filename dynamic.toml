@@ -1,0 +1,38 @@
+[http.routers]
+
+  [http.routers.ui]
+    rule = "PathPrefix(`/`)"
+    service = "ui-service"
+    priority = 1
+
+  [http.routers.input]
+    rule = "PathPrefix(`/api/credit`)"
+    service = "input-service"
+    priority = 3
+
+  [http.routers.policy]
+    rule = "PathPrefix(`/policy`)"
+    service = "policy-service"
+    middlewares = ["strip-policy-prefix"]
+    priority = 4
+
+
+[http.middlewares]
+
+  [http.middlewares.strip-policy-prefix.stripPrefix]
+    prefixes = ["/policy"]
+
+
+[http.services]
+
+  [http.services.ui-service.loadBalancer]
+    [[http.services.ui-service.loadBalancer.servers]]
+      url = "http://localhost:8080"
+
+  [http.services.input-service.loadBalancer]
+    [[http.services.input-service.loadBalancer.servers]]
+      url = "http://localhost:8081"
+
+  [http.services.policy-service.loadBalancer]
+    [[http.services.policy-service.loadBalancer.servers]]
+      url = "http://localhost:8082"
