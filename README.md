@@ -98,4 +98,12 @@ For traefik - https://github.com/traefik/traefik/releases/tag/v3.6.13
 nohup ./traefik --configFile=traefik.toml > nohup.out 2>&1 &
 ```
 
+For Envoy - https://github.com/envoyproxy/envoy/releases
+
+(https://github.com/envoyproxy/envoy/releases/download/v1.37.2/envoy-1.37.2-linux-x86_64)
+
+```bash
+nohup ./envoy-1.37.2-linux-x86_64 -c envoy.yaml > nohup.out 2>&1 &
+```
+
 
