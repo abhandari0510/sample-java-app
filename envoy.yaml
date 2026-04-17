@@ -1,0 +1,40 @@
+clusters:
+  - name: ui-service
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: ui-service
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: localhost
+                port_value: 8080
+  - name: input-service
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: input-service
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: localhost
+                port_value: 8081
+  - name: policy-service
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: policy-service
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: localhost
+                port_value: 8082
