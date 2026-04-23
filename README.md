@@ -13,7 +13,7 @@ No database is used. All input and logs are written to local files.
 - `credit-ui`: http://localhost:8080
 - `credit-input`: http://localhost:8081
 - `policy-generator`: http://localhost:8082
-- `traefik`: http://localhost:8088
+- `envoy`: http://localhost:8088
 
 ## Service URL environment variables
 
@@ -56,10 +56,10 @@ To capture access logs for both user traffic and inter-service calls:
 ./start-all.sh
 ```
 
-2. Start Traefik (v3.6.13):
+2. Start Envoy:
 
 ```bash
-./traefik --configFile=traefik.toml
+./envoy-1.37.2-linux-x86_64 -c envoy.yaml
 ```
 
 3. Open the UI through Traefik:
@@ -70,9 +70,9 @@ http://localhost:8088
 
 With this setup:
 
-- Browser -> `credit-ui` goes through Traefik.
-- `credit-ui` -> `credit-input` goes through Traefik.
-- `credit-input` -> `policy-generator` goes through Traefik.
+- Browser -> `credit-ui` goes through Envoy.
+- `credit-ui` -> `credit-input` goes through Envoy.
+- `credit-input` -> `policy-generator` goes through Envoy.
 
 ## Local files
 
