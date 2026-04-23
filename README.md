@@ -46,7 +46,7 @@ Then open the UI directly at:
 http://localhost:8080
 ```
 
-## Route All Calls Through Traefik
+## Route All Calls Through Envoy
 
 To capture access logs for both user traffic and inter-service calls:
 
@@ -62,7 +62,7 @@ To capture access logs for both user traffic and inter-service calls:
 ./envoy-1.37.2-linux-x86_64 -c envoy.yaml
 ```
 
-3. Open the UI through Traefik:
+3. Open the UI through Envoy:
 
 ```bash
 http://localhost:8088
