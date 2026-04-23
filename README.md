@@ -87,5 +87,12 @@ With this setup:
 
 - The policy generator returns the same application number for the same input payload.
 - Each service logs transaction details locally.
-- Traefik access logging is enabled in JSON format with request/response metadata fields and headers.
 - No database is used.
+
+## Alloy
+Use alloy-pii-metrics.alloy as the configuration file and run Grafana Alloy agent and it will process the logs and convert them into metrics which can be viewed at localhost:12345/metrics.
+
+Use the below command to start Alloy - 
+```bash
+alloy run --server.http.listen-addr=0.0.0.0:12345 alloy-pii-metrics.alloy
+```
