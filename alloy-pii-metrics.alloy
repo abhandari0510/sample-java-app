@@ -1,0 +1,325 @@
+// Grafana Alloy pipeline for Envoy access-log based HTTP + PII metrics.
+// Run with:
+//   alloy run --server.http.listen-addr=0.0.0.0:12345 alloy-pii-metrics.alloy
+// Metrics will be exposed at:
+//   http://localhost:12345/metrics
+
+loki.source.file "envoy_access" {
+  targets = [
+    {
+      __path__ = "/home/akashbhandari/sample-java-app/logs/envoy-access.log",
+      job      = "envoy_access",
+    },
+  ]
+
+  tail_from_end = false
+  forward_to    = [loki.process.envoy_metrics.receiver]
+}
+
+loki.process "envoy_metrics" {
+  forward_to = [loki.echo.debug.receiver]
+
+  stage.json {
+    expressions = {
+      method                   = "method",
+      path                     = "path",
+      protocol                 = "protocol",
+      status                   = "response_code",
+      response_flags           = "response_flags",
+      upstream_host            = "upstream_host",
+      duration_ms              = "duration",
+      upstream_service_time_ms = "upstream_service_time",
+      bytes_received           = "bytes_received",
+      bytes_sent               = "bytes_sent",
+      request_body             = "request_body",
+    }
+  }
+
+  // Alloy histograms accept duration strings and convert them to seconds.
+  stage.template {
+    source   = "duration_seconds_input"
+    template = `{{ if .duration_ms }}{{ .duration_ms }}ms{{ else }}0ms{{ end }}`
+  }
+
+  stage.template {
+    source   = "upstream_service_time_seconds_input"
+    template = `{{ if .upstream_service_time_ms }}{{ .upstream_service_time_ms }}ms{{ else }}0ms{{ end }}`
+  }
+
+  stage.template {
+    source   = "source_service"
+    template = `{{ if regexMatch "^/api/credit" .path }}ui-service{{ else if regexMatch "^/policy" .path }}input-service{{ else }}client{{ end }}`
+  }
+
+  stage.template {
+    source   = "dest_service"
+    template = `{{ if regexMatch "^/api/credit" .path }}input-service{{ else if regexMatch "^/policy" .path }}policy-service{{ else }}ui-service{{ end }}`
+  }
+
+  stage.template {
+    source   = "request_body_upper"
+    template = `{{ if .request_body }}{{ ToUpper .request_body }}{{ else }}{{ end }}`
+  }
+
+  // PII detection flags derived only from regex over the request body.
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<name_match>[A-Z][a-z]+(?:\\s+[A-Z][a-z]+){1,3})\""
+  }
+
+  stage.template {
+    source   = "name_detected"
+    template = `{{ if .name_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<phone_match>(?:\\+91[- ]?)?[6-9]\\d{9})\""
+  }
+
+  stage.template {
+    source   = "phone_detected"
+    template = `{{ if .phone_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<aadhaar_match>(?:[2-9]\\d{3}\\s?\\d{4}\\s?\\d{4}))\""
+  }
+
+  stage.template {
+    source   = "aadhaar_detected"
+    template = `{{ if .aadhaar_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body_upper"
+    expression = ":\\s*\"(?P<pan_match>[A-Z]{5}\\d{4}[A-Z])\""
+  }
+
+  stage.template {
+    source   = "pan_detected"
+    template = `{{ if .pan_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<credit_card_match>(?:\\d[ -]?){13,19})\""
+  }
+
+  stage.template {
+    source   = "credit_card_detected"
+    template = `{{ if .credit_card_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<credit_card_expiry_match>(?:0[1-9]|1[0-2])/(?:\\d{2}|\\d{4}))\""
+  }
+
+  stage.template {
+    source   = "credit_card_expiry_detected"
+    template = `{{ if .credit_card_expiry_match }}true{{ else }}false{{ end }}`
+  }
+
+  stage.regex {
+    source     = "request_body"
+    expression = ":\\s*\"(?P<cvc_match>\\d{3,4})\""
+  }
+
+  stage.template {
+    source   = "cvc_detected"
+    template = `{{ if and .cvc_match (eq .credit_card_detected "true") (eq .credit_card_expiry_detected "true") }}true{{ else }}false{{ end }}`
+  }
+
+  // These labels become metric labels as well.
+  stage.labels {
+    values = {
+      method         = "",
+      path           = "",
+      protocol       = "",
+      status         = "",
+      response_flags = "",
+      upstream_host  = "",
+      source_service = "",
+      dest_service   = "",
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "http_requests_total"
+      description       = "HTTP requests derived from Envoy access logs"
+      prefix            = ""
+      match_all         = true
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "http_response_flags_total"
+      description       = "HTTP response flags derived from Envoy access logs"
+      prefix            = ""
+      match_all         = true
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_request_duration_seconds"
+      description       = "Request duration in seconds derived from Envoy access logs"
+      prefix            = ""
+      source            = "duration_seconds_input"
+      buckets           = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_upstream_service_time_seconds"
+      description       = "Upstream service time in seconds derived from Envoy access logs"
+      prefix            = ""
+      source            = "upstream_service_time_seconds_input"
+      buckets           = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_request_bytes_total"
+      description       = "Request bytes derived from Envoy access logs"
+      prefix            = ""
+      source            = "bytes_received"
+      buckets           = [0, 100, 500, 1000, 5000, 10000, 50000, 100000]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_response_bytes_total"
+      description       = "Response bytes derived from Envoy access logs"
+      prefix            = ""
+      source            = "bytes_sent"
+      buckets           = [0, 100, 500, 1000, 5000, 10000, 50000, 100000]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_request_body_size_bytes"
+      description       = "Request body size proxy using Envoy bytes_received"
+      prefix            = ""
+      source            = "bytes_received"
+      buckets           = [0, 100, 500, 1000, 5000, 10000, 50000, 100000]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.histogram {
+      name              = "http_response_body_size_bytes"
+      description       = "Response body size proxy using Envoy bytes_sent"
+      prefix            = ""
+      source            = "bytes_sent"
+      buckets           = [0, 100, 500, 1000, 5000, 10000, 50000, 100000]
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_name_transferred_total"
+      description       = "Regex-detected name transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "name_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_phone_number_transferred_total"
+      description       = "Regex-detected phone number transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "phone_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_aadhar_number_transferred_total"
+      description       = "Regex-detected Aadhaar transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "aadhaar_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_pan_number_transferred_total"
+      description       = "Regex-detected PAN transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "pan_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_credit_card_number_transferred_total"
+      description       = "Regex-detected credit card number transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "credit_card_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_credit_card_expiry_transferred_total"
+      description       = "Regex-detected credit card expiry transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "credit_card_expiry_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+
+  stage.metrics {
+    metric.counter {
+      name              = "pii_cvc_transferred_total"
+      description       = "Regex-detected CVC transfers from Envoy request bodies"
+      prefix            = ""
+      source            = "cvc_detected"
+      value             = "true"
+      action            = "inc"
+      max_idle_duration = "24h"
+    }
+  }
+}
+
+// This keeps the config self-contained. Replace with loki.write if you also
+// want to ship the processed logs somewhere.
+loki.echo "debug" {}
+
