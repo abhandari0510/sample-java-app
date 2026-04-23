@@ -1,0 +1,132 @@
+data_dir = "/tmp"
+
+[sources.envoy_logs]
+type = "file"
+include = ["/home/akashbhandari/sample-java-app/logs/envoy-access.log"]
+read_from = "beginning"
+
+[transforms.parse_log]
+type = "remap"
+inputs = ["envoy_logs"]
+source = '''
+parsed = parse_json(.message) ?? {}
+.status = to_int(parsed.response_code) ?? 0
+.duration = (to_float(parsed.duration) ?? 0.0) / 1000.0
+.method = parsed.method || "UNKNOWN"
+.path = parsed.path || "unknown"
+.protocol = parsed.protocol || "unknown"
+.response_flags = parsed.response_flags || "-"
+.upstream_host = parsed.upstream_host || "unknown"
+.upstream_port = split!(.upstream_host, ":")[-1] || ""
+.authority = parsed.authority || ""
+.request_id = parsed.request_id || ""
+.bytes_received = to_int(parsed.bytes_received) ?? 0
+.bytes_sent = to_int(parsed.bytes_sent) ?? 0
+.upstream_service_time = (to_float(parsed.upstream_service_time) ?? 0.0) / 1000.0
+.request_body_size = to_int(parsed.bytes_received) ?? 0
+.response_body_size = to_int(parsed.bytes_sent) ?? 0
+.request_count = 1
+
+# Determine source and destination services based on path
+.path = to_string(.path) ?? "unknown"
+if starts_with(.path, "/api/credit") {
+  .source_service = "ui-service"
+  .dest_service = "input-service"
+} else if starts_with(.path, "/policy") {
+  .source_service = "input-service"
+  .dest_service = "policy-service"
+} else {
+  .source_service = "client"
+  .dest_service = "ui-service"
+}
+
+# Default PII count fields to 0 if not set
+.name_count = 0
+.phoneNumber_count = 0
+.aadharNumber_count = 0
+.panNumber_count = 0
+.creditCardNumber_count = 0
+.creditCardExpiry_count = 0
+.cvc_count = 0
+
+# Parse request body to detect PII fields using regex (without storing actual values)
+if parsed.request_body != null && parsed.request_body != "" {
+  body_str = to_string(parsed.request_body)
+  body_json = parse_json(parsed.request_body) ?? {}
+  if exists(body_json, "name") && matches(to_string(get(body_json, "name")), r"[A-Z][a-z]+(?:\\s[A-Z][a-z]+)*") {
+    .name_count = 1
+  }
+  if matches(body_str, r"[A-Z][a-z]+(?:\\s[A-Z][a-z]+)*") {
+    .name_count = 1
+  }
+
+  if exists(body_json, "phoneNumber") && matches(to_string(get(body_json, "phoneNumber")), r"[6-9]\\d{9}") {
+    .phoneNumber_count = 1
+  }
+  if matches(body_str, r"[6-9]\\d{9}") {
+    .phoneNumber_count = 1
+  }
+
+  if exists(body_json, "aadharNumber") && matches(to_string(get(body_json, "aadharNumber")), r"\\d{12}") {
+    .aadharNumber_count = 1
+  }
+  if matches(body_str, r"\\d{12}") {
+    .aadharNumber_count = 1
+  }
+
+  if exists(body_json, "panNumber") && matches(to_string(get(body_json, "panNumber")), r"[A-Z]{5}\\d{4}[A-Z]") {
+    .panNumber_count = 1
+  }
+  if matches(body_str, r"[A-Z]{5}\\d{4}[A-Z]") {
+    .panNumber_count = 1
+  }
+
+  if exists(body_json, "creditCardNumber") && matches(to_string(get(body_json, "creditCardNumber")), r"\\d{13,19}") {
+    .creditCardNumber_count = 1
+  }
+  if matches(body_str, r"\\d{13,19}") {
+    .creditCardNumber_count = 1
+  }
+
+  if exists(body_json, "creditCardExpiry") && matches(to_string(get(body_json, "creditCardExpiry")), r"(0[1-9]|1[0-2])/[0-9]{4}") {
+    .creditCardExpiry_count = 1
+  }
+  if matches(body_str, r"(0[1-9]|1[0-2])/[0-9]{4}") {
+    .creditCardExpiry_count = 1
+  }
+
+  if exists(body_json, "cvc") && matches(to_string(get(body_json, "cvc")), r"\\d{3,4}") {
+    .cvc_count = 1
+  }
+  if matches(body_str, r"\\d{3,4}") {
+    .cvc_count = 1
+  }
+}
+'''
+
+[transforms.log_to_metrics]
+type = "log_to_metric"
+inputs = ["parse_log"]
+metrics = [
+  { type = "counter", name = "http_requests_total", field = "request_count", increment_by_value = true, tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}", protocol = "{{protocol}}", upstream_host = "{{upstream_host}}", response_flags = "{{response_flags}}" } },
+  { type = "counter", name = "http_response_flags_total", field = "request_count", increment_by_value = true, tags = { response_flags = "{{response_flags}}", status = "{{status}}", method = "{{method}}" } },
+  { type = "histogram", name = "http_request_duration_seconds", field = "duration", buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}", upstream_host = "{{upstream_host}}" } },
+  { type = "histogram", name = "http_upstream_service_time_seconds", field = "upstream_service_time", buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}", upstream_host = "{{upstream_host}}" } },
+  { type = "histogram", name = "http_request_bytes_total", field = "bytes_received", buckets = [0, 100, 500, 1000, 5000, 10000, 50000, 100000], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}", upstream_host = "{{upstream_host}}" } },
+  { type = "histogram", name = "http_response_bytes_total", field = "bytes_sent", buckets = [0, 100, 500, 1000, 5000, 10000, 50000, 100000], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}", upstream_host = "{{upstream_host}}" } },
+  { type = "histogram", name = "http_request_body_size_bytes", field = "request_body_size", buckets = [0, 100, 500, 1000, 5000, 10000, 50000, 100000], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}" } },
+  { type = "histogram", name = "http_response_body_size_bytes", field = "response_body_size", buckets = [0, 100, 500, 1000, 5000, 10000, 50000, 100000], tags = { method = "{{method}}", status = "{{status}}", path = "{{path}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "name_count", increment_by_value = true, tags = { field = "name", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "phoneNumber_count", increment_by_value = true, tags = { field = "phoneNumber", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "aadharNumber_count", increment_by_value = true, tags = { field = "aadharNumber", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "panNumber_count", increment_by_value = true, tags = { field = "panNumber", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "creditCardNumber_count", increment_by_value = true, tags = { field = "creditCardNumber", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "creditCardExpiry_count", increment_by_value = true, tags = { field = "creditCardExpiry", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } },
+  { type = "counter", name = "pii_data_transferred", field = "cvc_count", increment_by_value = true, tags = { field = "cvc", source_service = "{{source_service}}", dest_service = "{{dest_service}}" } }
+]
+
+[sinks.prometheus]
+type = "prometheus_exporter"
+inputs = ["log_to_metrics"]
+address = "0.0.0.0:9095"
+
